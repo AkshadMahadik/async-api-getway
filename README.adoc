@@ -43,7 +43,7 @@ A high-performance, non-blocking API gateway built with Vert.x 5 that aggregates
 
 ### 1. Clone and Build
 ```bash
-git clone <your-repo>
+git clone https://github.com/AkshadMahadik/async-api-getway.git
 cd async-api-gateway
 mvn clean package
 ```
@@ -294,17 +294,8 @@ jstat -gc <pid> 1000
 - [ ] Multi-region failover
 - [ ] A/B testing capabilities
 
-## Contributing
 
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open Pull Request
 
-## License
-
-MIT License - see LICENSE file for details
 
 ## References
 
