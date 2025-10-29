@@ -1,31 +1,313 @@
-= Async-api-gateway
+# Asynchronous API Gateway - Vert.x 5
 
-image:https://img.shields.io/badge/vert.x-5.0.4-purple.svg[link="https://vertx.io"]
+A high-performance, non-blocking API gateway built with Vert.x 5 that aggregates data from multiple external APIs.
 
-This application was generated using http://start.vertx.io
+## Architecture
+                                ┌──────────────────┐
+                                │                  │
+                        ┌──────▶│  Posts API       │
+                        │       │  (External)      │
+┌──────────────┐        │       └──────────────────┘
+│              │        │
+│   Client     │───────▶│  Circuit Breaker Layer
+│              │        │
+└──────────────┘        │       ┌──────────────────┐
+                        │       │                  │
+                        └──────▶│  Users API       │
+                                │  (External)      │
+                                └──────────────────┘
+                                         │
+                                         ▼
+                                ┌──────────────────┐
+                                │                  │
+                                │  Aggregated      │
+                                │  Response        │
+                                └──────────────────┘
 
-== Building
+## Features
 
-To launch your tests:
+- **Parallel API Calls**: Uses Vert.x CompositeFuture for concurrent requests
+- **Circuit Breaker Pattern**: Protects against cascading failures
+- **Non-blocking I/O**: Fully asynchronous with Vert.x event loop
+- **Error Resilience**: Graceful degradation and proper error responses
+- **Monitoring Endpoints**: Health checks and circuit breaker status
+- **Production Ready**: Docker support, logging, connection pooling
+
+## Prerequisites
+
+- Java 17 or higher
+- Maven 3.6+
+- (Optional) Docker & Docker Compose
+
+## Quick Start
+
+### 1. Clone and Build
+```bash
+git clone <your-repo>
+cd async-api-gateway
+mvn clean package
 ```
-./mvnw clean test
+
+### 2. Run
+```bash
+# Using Maven
+mvn exec:java
+
+# Or using the fat JAR
+java -jar target/async-api-gateway-1.0-SNAPSHOT.jar
 ```
 
-To package your application:
+### 3. Test
+```bash
+# Aggregate endpoint
+curl http://localhost:8080/aggregate
+
+# Health check
+curl http://localhost:8080/health
+
+# Circuit status
+curl http://localhost:8080/status
 ```
-./mvnw clean package
+
+## API Endpoints
+
+### GET /aggregate
+Aggregates data from two external APIs in parallel.
+
+**Response (200 OK):**
+```json
+{
+  "post_title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+  "author_name": "Leanne Graham",
+  "response_time_ms": 1234
+}
 ```
 
-To run your application:
+**Error Response (502 Bad Gateway):**
+```json
+{
+  "error": "Failed to retrieve upstream data",
+  "details": "timeout",
+  "response_time_ms": 5001
+}
 ```
-./mvnw clean compile exec:java
+
+### GET /health
+Health check endpoint for monitoring.
+
+**Response:**
+```json
+{
+  "status": "UP",
+  "timestamp": 1698765432000
+}
 ```
 
-== Help
+### GET /status
+Circuit breaker status for debugging.
 
-* https://vertx.io/docs/[Vert.x Documentation]
-* https://stackoverflow.com/questions/tagged/vert.x?sort=newest&pageSize=15[Vert.x Stack Overflow]
-* https://groups.google.com/forum/?fromgroups#!forum/vertx[Vert.x User Group]
-* https://discord.gg/6ry7aqPWXy[Vert.x Discord]
+**Response:**
+```json
+{
+  "posts_circuit": {
+    "state": "CLOSED",
+    "info": "SimpleCircuitBreaker[name=posts, state=CLOSED, failures=0]"
+  },
+  "users_circuit": {
+    "state": "CLOSED",
+    "info": "SimpleCircuitBreaker[name=users, state=CLOSED, failures=0]"
+  }
+}
+```
 
+## Configuration
 
+Edit `AggregatorVerticle.java` to customize:
+```java
+// Server configuration
+private static final int SERVER_PORT = 8080;
+private static final long TIMEOUT_MS = 5000;
+private static final int MAX_POOL_SIZE = 10;
+
+// Circuit breaker configuration
+new SimpleCircuitBreaker("posts", 3, Duration.ofSeconds(10));
+//                              ▲              ▲
+//                    failure threshold    reset duration
+```
+
+## Testing
+```bash
+# Run all tests
+mvn test
+
+# Run specific test
+mvn test -Dtest=AggregatorTest#aggregateReturnsData
+
+# Run with coverage
+mvn clean test jacoco:report
+```
+
+## Docker Deployment
+```bash
+# Build and run with Docker Compose
+docker-compose up --build
+
+# Or build manually
+docker build -t vertx-api-gateway .
+docker run -p 8080:8080 vertx-api-gateway
+
+# Check logs
+docker-compose logs -f api-gateway
+```
+
+## Performance Tuning
+
+### JVM Options
+```bash
+java -Xmx1g -Xms512m \
+     -XX:+UseG1GC \
+     -XX:MaxGCPauseMillis=200 \
+     -jar target/async-api-gateway-1.0-SNAPSHOT.jar
+```
+
+### Vert.x Options
+Modify `MainVerticle.java`:
+```java
+VertxOptions options = new VertxOptions()
+  .setEventLoopPoolSize(8)
+  .setWorkerPoolSize(20)
+  .setBlockedThreadCheckInterval(5000);
+
+Vertx vertx = Vertx.vertx(options);
+```
+
+## Circuit Breaker Behavior
+
+The circuit breaker has three states:
+
+1. **CLOSED** (Normal)
+   - All requests pass through
+   - Failures are counted
+   
+2. **OPEN** (Failure threshold reached)
+   - Requests fail immediately
+   - After reset duration → HALF_OPEN
+   
+3. **HALF_OPEN** (Testing recovery)
+   - One test request allowed
+   - Success → CLOSED
+   - Failure → OPEN
+
+Example flow:
+CLOSED ──(3 failures)──▶ OPEN ──(10s wait)──▶ HALF_OPEN
+▲                                              │
+└──────────────(success)────────────────────┘
+
+## Monitoring & Observability
+
+### Logs
+Logs are output via SLF4J. Configure `simplelogger.properties` in `src/main/resources/`:
+```properties
+org.slf4j.simpleLogger.defaultLogLevel=info
+org.slf4j.simpleLogger.log.com.example.vertx=debug
+org.slf4j.simpleLogger.showDateTime=true
+org.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd HH:mm:ss
+```
+
+### Metrics (Future Enhancement)
+Add Vert.x Micrometer for metrics:
+```xml
+<dependency>
+  <groupId>io.vertx</groupId>
+  <artifactId>vertx-micrometer-metrics</artifactId>
+  <version>5.0.0.CR2</version>
+</dependency>
+```
+
+## Troubleshooting
+
+### Circuit Keeps Opening
+```bash
+# Check circuit status
+curl http://localhost:8080/status
+
+# Common causes:
+# - External APIs are slow/down
+# - Network issues
+# - Timeout too aggressive
+
+# Solutions:
+# 1. Increase timeout in AggregatorVerticle
+# 2. Increase failure threshold
+# 3. Increase reset duration
+```
+
+### High Latency
+```bash
+# Check response times
+curl -w "\nTime: %{time_total}s\n" http://localhost:8080/aggregate
+
+# Solutions:
+# 1. Increase connection pool size
+# 2. Enable HTTP/2
+# 3. Add caching layer
+```
+
+### Memory Issues
+```bash
+# Monitor heap usage
+jstat -gc <pid> 1000
+
+# Solutions:
+# 1. Increase heap: -Xmx2g
+# 2. Tune GC: -XX:+UseG1GC
+# 3. Close WebClient properly
+```
+
+## Production Checklist
+
+- [ ] Configure proper SSL certificates (remove `trustAll(true)`)
+- [ ] Set up centralized logging (ELK, Splunk, etc.)
+- [ ] Add metrics and dashboards (Prometheus + Grafana)
+- [ ] Implement rate limiting
+- [ ] Add request/response validation
+- [ ] Set up health check monitoring
+- [ ] Configure circuit breaker thresholds per environment
+- [ ] Add distributed tracing (Jaeger, Zipkin)
+- [ ] Implement caching for frequently accessed data
+- [ ] Set up alerting for circuit breaker openings
+- [ ] Add authentication/authorization
+- [ ] Configure proper CORS if needed
+- [ ] Set up blue-green or canary deployment
+- [ ] Load test with realistic traffic patterns
+
+## Advanced Features (Future Roadmap)
+
+- [ ] Request/Response caching with Redis
+- [ ] API versioning
+- [ ] Rate limiting per client
+- [ ] GraphQL endpoint
+- [ ] WebSocket support for real-time updates
+- [ ] Service mesh integration (Istio, Linkerd)
+- [ ] Database connection pooling
+- [ ] Message queue integration (Kafka, RabbitMQ)
+- [ ] Multi-region failover
+- [ ] A/B testing capabilities
+
+## Contributing
+
+1. Fork the repository
+2. Create feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open Pull Request
+
+## License
+
+MIT License - see LICENSE file for details
+
+## References
+
+- [Vert.x Documentation](https://vertx.io/docs/)
+- [Circuit Breaker Pattern](https://martinfowler.com/bliki/CircuitBreaker.html)
+- [Reactive Programming Guide](https://www.reactivemanifesto.org/)
